@@ -33,8 +33,8 @@ tx_flange_flangerot45[:3,:3] = st.Rotation.from_euler('z', [np.pi/4]).as_matrix(
 tx_flange_tip = tx_flange_flangerot45 @ tx_flangerot45_flangerot90 @tx_flangerot90_tip
 tx_tip_flange = np.linalg.inv(tx_flange_tip)
 
-class FrankaInterface:
-    def __init__(self, ip='172.16.0.3', port=4242):
+class FrankaInterface:  # server가 돌아가는 nuc <-> client가 돌아가는 desktop
+    def __init__(self, ip='172.16.0.3', port=4242): # server(nuc)의 ip + port 
         self.server = zerorpc.Client(heartbeat=20)
         self.server.connect(f"tcp://{ip}:{port}")
 
@@ -148,8 +148,8 @@ class FrankaInterpolationController(mp.Process):
         ring_buffer = SharedMemoryRingBuffer.create_from_examples(
             shm_manager=shm_manager,
             examples=example,
-            get_max_k=get_max_k,
-            get_time_budget=0.2,
+            get_max_k=get_max_k,    # 최대 조회 갯수 
+            get_time_budget=0.2,    # get 호출 시 데이터 복사 허용 최대 시간
             put_desired_frequency=frequency
         )
 
@@ -229,7 +229,7 @@ class FrankaInterpolationController(mp.Process):
             return self.ring_buffer.get_last_k(k=k,out=out)
     
     def get_all_state(self):
-        return self.ring_buffer.get_all()
+        return self.ring_buffer.get_all()   # 버퍼가 k개 이상 차 있으면 최대 k개, 아니면 차있는 만큼 state return 
     
 
     # ========= main loop in process ============
@@ -280,8 +280,8 @@ class FrankaInterpolationController(mp.Process):
                 # diff = t_now - pose_interp.times[-1]
                 # if diff > 0:
                 #     print('extrapolate', diff)
-                tip_pose = pose_interp(t_now)
-                flange_pose = mat_to_pose(pose_to_mat(tip_pose) @ tx_tip_flange)
+                tip_pose = pose_interp(t_now) # t_now의 보간된 tip 위치 call 
+                flange_pose = mat_to_pose(pose_to_mat(tip_pose) @ tx_tip_flange)    
 
                 # send command to robot
                 robot.update_desired_ee_pose(flange_pose)
@@ -303,7 +303,7 @@ class FrankaInterpolationController(mp.Process):
                     # n_cmd = len(commands['cmd'])
                     # process at most 1 command per cycle to maintain frequency
                     commands = self.input_queue.get_k(1)
-                    n_cmd = len(commands['cmd'])
+                    n_cmd = len(commands['cmd'])    # 이 경우 n_cmd =1 인듯
                 except Empty:
                     n_cmd = 0
 
@@ -318,7 +318,7 @@ class FrankaInterpolationController(mp.Process):
                         keep_running = False
                         # stop immediately, ignore later commands
                         break
-                    elif cmd == Command.SERVOL.value:
+                    elif cmd == Command.SERVOL.value:   # 사용 x 
                         # since curr_pose always lag behind curr_target_pose
                         # if we start the next interpolation with curr_pose
                         # the command robot receive will have discontinouity 
@@ -327,7 +327,7 @@ class FrankaInterpolationController(mp.Process):
                         duration = float(command['duration'])
                         curr_time = t_now + dt
                         t_insert = curr_time + duration
-                        pose_interp = pose_interp.drive_to_waypoint(
+                        pose_interp = pose_interp.drive_to_waypoint(    # target_pose로 이동하는 경로 생성, 보간 이용 
                             pose=target_pose,
                             time=t_insert,
                             curr_time=curr_time,
@@ -336,13 +336,13 @@ class FrankaInterpolationController(mp.Process):
                         if self.verbose:
                             print("[FrankaPositionalController] New pose target:{} duration:{}s".format(
                                 target_pose, duration))
-                    elif cmd == Command.SCHEDULE_WAYPOINT.value:
+                    elif cmd == Command.SCHEDULE_WAYPOINT.value:    # 실제로 사용되는 코드 
                         target_pose = command['target_pose']
                         target_time = float(command['target_time'])
                         # translate global time to monotonic time
                         target_time = time.monotonic() - time.time() + target_time
                         curr_time = t_now + dt
-                        pose_interp = pose_interp.schedule_waypoint(
+                        pose_interp = pose_interp.schedule_waypoint(    # waypoint 보간하여 pose_interp으로 저장
                             pose=target_pose,
                             time=target_time,
                             curr_time=curr_time,

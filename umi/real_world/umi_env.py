@@ -348,12 +348,23 @@ class UmiEnv:
         self.stop()
 
     # ========= async env API ===========
-    def get_obs(self) -> dict:
+    def get_obs(self) -> dict: # dictionary 형태로 return
         """
         Timestamp alignment policy
         'current' time is the last timestamp of align_camera_idx
         All other cameras, find corresponding frame with the nearest timestamp
         All low-dim observations, interpolate with respect to 'current' time
+        
+        obs_data = {
+            'camera0_rgb': np.array([...]),                # 카메라 0의 RGB 이미지 (HxWx3)
+            'camera0_rgb_mirror_crop': np.array([...]),    # 좌우 반전된 crop 이미지 (옵션)
+            # 'camera1_rgb': np.array([...]),                # 카메라 1의 RGB 이미지
+            'robot0_eef_pos': np.array([...]),             # 로봇 EE 위치 (x, y, z) # (N, 3)
+            'robot0_eef_rot_axis_angle': np.array([...]),  # 로봇 EE의 회전 (로드리게스 벡터) # (N, 3)
+            'robot0_gripper_width': np.array([...]),       # 그리퍼 폭 (m)  # (N, 1)
+            'timestamp': np.array([...])                   # 각 관측값의 타임스탬프 # (N,) (camera_obs_timestamp -> 기준 timestamp)
+        }
+        
         """
 
         "observation dict"
@@ -361,6 +372,8 @@ class UmiEnv:
 
         # get data
         # 60 Hz, camera_calibrated_timestamp
+        # 최근 k개의 데이터(frame, timestampe) 수집하여 last_camera_data로 저장
+        # camera_obs_horizon = 2, camera_down_sample_steps =1, frequency =20 , math.ceil(올림) 
         k = math.ceil(
             self.camera_obs_horizon * self.camera_down_sample_steps \
             * (60 / self.frequency))
@@ -369,7 +382,8 @@ class UmiEnv:
             out=self.last_camera_data)
 
         # 125/500 hz, robot_receive_timestamp
-        last_robot_data = self.robot.get_all_state()
+        # robot = FrankaInterpolationController
+        last_robot_data = self.robot.get_all_state()    # 최대 k개의 target_pose 
         # both have more than n_obs_steps data
 
         # 30 hz, gripper_receive_timestamp
@@ -378,11 +392,12 @@ class UmiEnv:
         last_timestamp = self.last_camera_data[self.align_camera_idx]['timestamp'][-1]
         dt = 1 / self.frequency
 
+        # camera, robot, gripper data를 timestamp에 맞게 동기화 
         # align camera obs timestamps
         camera_obs_timestamps = last_timestamp - (
             np.arange(self.camera_obs_horizon)[::-1] * self.camera_down_sample_steps * dt)
         camera_obs = dict()
-        for camera_idx, value in self.last_camera_data.items():
+        for camera_idx, value in self.last_camera_data.items(): # camera가 한대이므로 camera_idx = 0 
             this_timestamps = value['timestamp']
             this_idxs = list()
             for t in camera_obs_timestamps:
@@ -419,6 +434,7 @@ class UmiEnv:
         }
 
         # accumulate obs
+        # 각 timestamp에 따라 robot pose, joint, vel, gripper width를 robot_timestamp, gripper_timestamp에 따라 축적 
         if self.obs_accumulator is not None:
             self.obs_accumulator.put(
                 data={
@@ -436,6 +452,7 @@ class UmiEnv:
             )
 
         # return obs
+        # camera_obs_timestamps를 기준으로 camera, robot, gripper 정보 통합하여 return
         obs_data = dict(camera_obs)
         obs_data.update(robot_obs)
         obs_data.update(gripper_obs)
@@ -454,18 +471,20 @@ class UmiEnv:
             timestamps = np.array(timestamps)
 
         # convert action to pose
+        # receive_time을 기준으로, 그 이후의 action만 선택 
         receive_time = time.time()
         is_new = timestamps > receive_time
         new_actions = actions[is_new]
         new_timestamps = timestamps[is_new]
 
+        # compensate_latency가 true이면 robot, gripper action 보정 
         r_latency = self.robot_action_latency if compensate_latency else 0.0
         g_latency = self.gripper_action_latency if compensate_latency else 0.0
 
         # schedule waypoints
         for i in range(len(new_actions)):
-            r_actions = new_actions[i,:6]
-            g_actions = new_actions[i,6:]
+            r_actions = new_actions[i,:6]   # 6D pose
+            g_actions = new_actions[i,6:]   # 1D gripper_action 
             self.robot.schedule_waypoint(
                 pose=r_actions,
                 target_time=new_timestamps[i]-r_latency

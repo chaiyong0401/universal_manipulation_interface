@@ -2,16 +2,27 @@
   # robot configurations, 0->right 1->left
   # comment out robot #1 if only using 1 arm
   "robots": [
+    # {
+    #   "robot_type": "ur5e",
+    #   "robot_ip": "192.168.0.8",
+    #   "robot_obs_latency": 0.0001, "robot_action_latency": 0.1, "tcp_offset": 0.235,
+    #   # table height for finger-table collision avoidance
+    #   # -inf to disable
+    #   "height_threshold": -0.024,
+    #   # sphere collision primitive size and location for inter-gripper collision avoidance
+    #   # 0 to disable
+    #   "sphere_radius": 0.1, "sphere_center": [0, -0.06, -0.185]
+    # },
     {
-      "robot_type": "ur5e",
-      "robot_ip": "192.168.0.8",
+      "robot_type": "franka",
+      "robot_ip": "192.168.0.8",    ## update required 
       "robot_obs_latency": 0.0001, "robot_action_latency": 0.1, "tcp_offset": 0.235,
       # table height for finger-table collision avoidance
       # -inf to disable
-      "height_threshold": -0.024,
+      "height_threshold": -0.024, # table 높이, -inf면 table과 충돌 방지 안함
       # sphere collision primitive size and location for inter-gripper collision avoidance
       # 0 to disable
-      "sphere_radius": 0.1, "sphere_center": [0, -0.06, -0.185]
+      "sphere_radius": 0.1, "sphere_center": [0, -0.06, -0.185]   # 두 로봇의 충돌 방지하기 위한 값, sphere_radius = 충돌 감지 반경, spere_center = 충돌 감지 구의 중심 위치 offset
     },
     # {
     #   "robot_type": "ur5",

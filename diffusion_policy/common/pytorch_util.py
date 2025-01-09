@@ -3,6 +3,7 @@ import collections
 import torch
 import torch.nn as nn
 
+# dictionary내의 모든 tensor에 주어진 func 적용 
 def dict_apply(
         x: Dict[str, torch.Tensor], 
         func: Callable[[torch.Tensor], torch.Tensor]

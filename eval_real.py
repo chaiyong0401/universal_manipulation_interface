@@ -48,32 +48,40 @@ from umi.common.cv_util import (
 from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 from umi.common.precise_sleep import precise_wait
-from umi.real_world.bimanual_umi_env import BimanualUmiEnv
+# from umi.real_world.bimanual_umi_env import BimanualUmiEnv
+from umi.real_world.umi_env import UmiEnv
+
 from umi.real_world.keystroke_counter import (
     KeystrokeCounter, Key, KeyCode
 )
+# try:
+#     from pynput.keyboard import Key, KeyCode, Listener
+# except ImportError:
+#     print("pynput is not available in this environment.")
+#     Key, KeyCode, Listener = None, None, None
 from umi.real_world.real_inference_util import (get_real_obs_dict,
                                                 get_real_obs_resolution,
                                                 get_real_umi_obs_dict,
+                                                get_real_umi_obs_dict_single,
                                                 get_real_umi_action)
-from umi.real_world.spacemouse_shared_memory import Spacemouse
+# from umi.real_world.spacemouse_shared_memory import Spacemouse
 from umi.common.pose_util import pose_to_mat, mat_to_pose
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
-def solve_table_collision(ee_pose, gripper_width, height_threshold):
+def solve_table_collision(ee_pose, gripper_width, height_threshold):    # robot의 EE와 table간 충돌 방지 height_threshold는 table의 높이로 해당 높이보다 내려가지 않도록 함 
     finger_thickness = 25.5 / 1000
-    keypoints = list()
+    keypoints = list()  # keypoints: 그리퍼의 4꼭지점
     for dx in [-1, 1]:
         for dy in [-1, 1]:
             keypoints.append((dx * gripper_width / 2, dy * finger_thickness / 2, 0))
     keypoints = np.asarray(keypoints)
     rot_mat = st.Rotation.from_rotvec(ee_pose[3:6]).as_matrix()
     transformed_keypoints = np.transpose(rot_mat @ np.transpose(keypoints)) + ee_pose[:3]
-    delta = max(height_threshold - np.min(transformed_keypoints[:, 2]), 0)
+    delta = max(height_threshold - np.min(transformed_keypoints[:, 2]), 0)  # 네 꼭지점 중 가장 낮은 z축 값보다 table 높이가 낮으면 delta 값을 이용해 그리퍼 높이 조절 
     ee_pose[2] += delta
 
-def solve_sphere_collision(ee_poses, robots_config):
+def solve_sphere_collision(ee_poses, robots_config):    # 두 robot의 EE간의 거리 측정하고 충돌 방지, threshold 초과하면 두 로봇을 이동시켜 충돌 방지 
     num_robot = len(robots_config)
     this_that_mat = np.identity(4)
     this_that_mat[:3, 3] = np.array([0, 0.89, 0]) # TODO: very hacky now!!!!
@@ -134,21 +142,26 @@ def main(input, output, robot_config,
     gripper_speed = 0.2
     
     # load robot config file
-    robot_config_data = yaml.safe_load(open(os.path.expanduser(robot_config), 'r'))
+    robot_config_data = yaml.safe_load(open(os.path.expanduser(robot_config), 'r')) # eval_robots_config.yaml 
     
     # load left-right robot relative transform
-    tx_left_right = np.array(robot_config_data['tx_left_right'])
-    tx_robot1_robot0 = tx_left_right
+    # bimanual setting
+    # tx_left_right = np.array(robot_config_data['tx_left_right'])
+    # tx_robot1_robot0 = tx_left_right
     
     robots_config = robot_config_data['robots']
     grippers_config = robot_config_data['grippers']
 
-    # load checkpoint
+    # load checkpoint, 'cfg'는 checkpoint에서 추출된 configuration -> model 및 dataset과 관련된 hyperparameter 
     ckpt_path = input
     if not ckpt_path.endswith('.ckpt'):
         ckpt_path = os.path.join(ckpt_path, 'checkpoints', 'latest.ckpt')
     payload = torch.load(open(ckpt_path, 'rb'), map_location='cpu', pickle_module=dill)
     cfg = payload['cfg']
+    
+    # cfg의 내용 확인 하기 위해 cfg_output.yaml 형태로 저장
+    # with open('cfg_output.yaml', 'w') as f:           
+    #     f.write(OmegaConf.to_yaml(cfg))
     print("model_name:", cfg.policy.obs_encoder.model_name)
     print("dataset_path:", cfg.task.dataset.dataset_path)
 
@@ -170,13 +183,42 @@ def main(input, output, robot_config,
 
     print("steps_per_inference:", steps_per_inference)
     with SharedMemoryManager() as shm_manager:
-        with Spacemouse(shm_manager=shm_manager) as sm, \
-            KeystrokeCounter() as key_counter, \
-            BimanualUmiEnv(
+        # with Spacemouse(shm_manager=shm_manager) as sm, \
+        #     KeystrokeCounter() as key_counter, \
+            # BimanualUmiEnv(
+            #     output_dir=output,
+            #     robots_config=robots_config,
+            #     grippers_config=grippers_config,
+            #     frequency=frequency,
+            #     obs_image_resolution=obs_res,
+            #     obs_float32=True,
+            #     camera_reorder=[int(x) for x in camera_reorder],
+            #     init_joints=init_joints,
+            #     enable_multi_cam_vis=True,
+            #     # latency
+            #     camera_obs_latency=0.17,
+            #     # obs
+            #     camera_obs_horizon=cfg.task.shape_meta.obs.camera0_rgb.horizon,
+            #     robot_obs_horizon=cfg.task.shape_meta.obs.robot0_eef_pos.horizon,
+            #     gripper_obs_horizon=cfg.task.shape_meta.obs.robot0_gripper_width.horizon,
+            #     no_mirror=no_mirror,
+            #     fisheye_converter=fisheye_converter,
+            #     mirror_swap=mirror_swap,
+            #     # action
+            #     max_pos_speed=2.0,
+            #     max_rot_speed=6.0,
+            #     shm_manager=shm_manager) as env:
+            
+        ## One Arm Setting 
+        # with Spacemouse(shm_manager=shm_manager) as sm, \
+        with KeystrokeCounter() as key_counter, \
+            UmiEnv(                     # franka robot set + frankainterpolationcontroller + gripper controller setting 필요
                 output_dir=output,
-                robots_config=robots_config,
-                grippers_config=grippers_config,
+                robot_ip='192.168.0.0',
+                gripper_ip ='192.168.0.0',
+                gripper_port = 1000,
                 frequency=frequency,
+                robot_type='franka',
                 obs_image_resolution=obs_res,
                 obs_float32=True,
                 camera_reorder=[int(x) for x in camera_reorder],
@@ -199,7 +241,7 @@ def main(input, output, robot_config,
             print("Waiting for camera")
             time.sleep(1.0)
 
-            # load match_dataset
+            # load match_dataset, 일반적으로는 존재 x 
             episode_first_frame_map = dict()
             match_replay_buffer = None
             if match_dataset is not None:
@@ -253,11 +295,17 @@ def main(input, output, robot_config,
                 episode_start_pose.append(pose)
             with torch.no_grad():
                 policy.reset()
-                obs_dict_np = get_real_umi_obs_dict(
+                # bimanual setting
+                # obs_dict_np = get_real_umi_obs_dict(
+                #     env_obs=obs, shape_meta=cfg.task.shape_meta, 
+                #     obs_pose_repr=obs_pose_rep,
+                #     tx_robot1_robot0=tx_robot1_robot0,
+                #     episode_start_pose=episode_start_pose)
+                obs_dict_np = get_real_umi_obs_dict_single(
                     env_obs=obs, shape_meta=cfg.task.shape_meta, 
                     obs_pose_repr=obs_pose_rep,
-                    tx_robot1_robot0=tx_robot1_robot0,
                     episode_start_pose=episode_start_pose)
+                
                 obs_dict = dict_apply(obs_dict_np, 
                     lambda x: torch.from_numpy(x).unsqueeze(0).to(device))
                 result = policy.predict_action(obs_dict)
@@ -436,14 +484,14 @@ def main(input, output, robot_config,
                     # start episode
                     policy.reset()
                     start_delay = 1.0
-                    eval_t_start = time.time() + start_delay
-                    t_start = time.monotonic() + start_delay
-                    env.start_episode(eval_t_start)
+                    eval_t_start = time.time() + start_delay    # 현재 시각 기준 start_delay 후의 절대 시간(log, timestamp 용도)
+                    t_start = time.monotonic() + start_delay    # 부팅 이후 기준 start_delay 후의 상대 시간(control loop, timer 용도)
+                    env.start_episode(eval_t_start)             # start recording and return first obs 
 
                     # get current pose
                     obs = env.get_obs()
                     episode_start_pose = list()
-                    for robot_id in range(len(robots_config)):
+                    for robot_id in range(len(robots_config)): # robot이 한대면 robot_id = 0
                         pose = np.concatenate([
                             obs[f'robot{robot_id}_eef_pos'],
                             obs[f'robot{robot_id}_eef_rot_axis_angle']
@@ -453,68 +501,75 @@ def main(input, output, robot_config,
                     # wait for 1/30 sec to get the closest frame actually
                     # reduces overall latency
                     frame_latency = 1/60
-                    precise_wait(eval_t_start - frame_latency, time_func=time.time)
+                    precise_wait(eval_t_start - frame_latency, time_func=time.time) # 현재 시간(time.time())을 기준으로 eval_t_start - frame_latency까지 대기 
                     print("Started!")
                     iter_idx = 0
                     perv_target_pose = None
                     while True:
                         # calculate timing
-                        t_cycle_end = t_start + (iter_idx + steps_per_inference) * dt
+                        t_cycle_end = t_start + (iter_idx + steps_per_inference) * dt # t_cycle_end = t_start + {iter_idx + inference_action_horizon(6)}*dt(0.1)
 
                         # get obs
                         obs = env.get_obs()
                         obs_timestamps = obs['timestamp']
-                        print(f'Obs latency {time.time() - obs_timestamps[-1]}')
+                        print(f'Obs latency {time.time() - obs_timestamps[-1]}') # Obs latency는 현재 시간 - observation data의 가장 최근 timestamp
 
                         # run inference
                         with torch.no_grad():
                             s = time.time()
-                            obs_dict_np = get_real_umi_obs_dict(
+                            # bimanual setting 
+                            # obs_dict_np = get_real_umi_obs_dict(
+                            #     env_obs=obs, shape_meta=cfg.task.shape_meta, 
+                            #     obs_pose_repr=obs_pose_rep,
+                            #     tx_robot1_robot0=tx_robot1_robot0,
+                            #     episode_start_pose=episode_start_pose)
+                            obs_dict_np = get_real_umi_obs_dict_single(
                                 env_obs=obs, shape_meta=cfg.task.shape_meta, 
                                 obs_pose_repr=obs_pose_rep,
-                                tx_robot1_robot0=tx_robot1_robot0,
                                 episode_start_pose=episode_start_pose)
+                            
+                            # dict 내부의 모든 numpy array를 pytorch tensor로 변환하고 unsqueeze 및 gpu로 이동 
                             obs_dict = dict_apply(obs_dict_np, 
                                 lambda x: torch.from_numpy(x).unsqueeze(0).to(device))
                             result = policy.predict_action(obs_dict)
-                            raw_action = result['action_pred'][0].detach().to('cpu').numpy()
+                            raw_action = result['action_pred'][0].detach().to('cpu').numpy() #raw_action: 10D(9D: robot_pose, 1D: gripper_action)
                             action = get_real_umi_action(raw_action, obs, action_pose_repr)
                             print('Inference latency:', time.time() - s)
                         
                         # convert policy action to env actions
-                        this_target_poses = action
-                        assert this_target_poses.shape[1] == len(robots_config) * 7
+                        this_target_poses = action  # 여러 time의 action 
+                        assert this_target_poses.shape[1] == len(robots_config) * 7 # robot이 1대면 7, 2대면 14
                         for target_pose in this_target_poses:
                             for robot_idx in range(len(robots_config)):
                                 solve_table_collision(
                                     ee_pose=target_pose[robot_idx * 7: robot_idx * 7 + 6],
                                     gripper_width=target_pose[robot_idx * 7 + 6],
-                                    height_threshold=robots_config[robot_idx]['height_threshold']
+                                    height_threshold=robots_config[robot_idx]['height_threshold']   #robot_config = eval_robot_config.yaml "robots"
                                 )
                             
-                            # solve collison between two robots
-                            solve_sphere_collision(
-                                ee_poses=target_pose.reshape([len(robots_config), -1]),
-                                robots_config=robots_config
-                            )
+                            # solve collison between two robots, bimanual setting 
+                            # solve_sphere_collision(
+                            #     ee_poses=target_pose.reshape([len(robots_config), -1]),
+                            #     robots_config=robots_config
+                            # )
 
-                        # deal with timing
-                        # the same step actions are always the target for
+                        # deal with timing(action 실행 타이밍 조절)
+                        # the same step actions are always the target for(latency로 action이 적시에 실행 안되면, 이를 보정하여 다음 가능한 timestamp에 action 스케쥴링)
                         action_timestamps = (np.arange(len(action), dtype=np.float64)
                             ) * dt + obs_timestamps[-1]
                         print(dt)
                         action_exec_latency = 0.01
                         curr_time = time.time()
                         is_new = action_timestamps > (curr_time + action_exec_latency)
-                        if np.sum(is_new) == 0:
+                        if np.sum(is_new) == 0: # 모든 action이 시간 초과
                             # exceeded time budget, still do something
-                            this_target_poses = this_target_poses[[-1]]
+                            this_target_poses = this_target_poses[[-1]] # 가장 최근의 action 선택하여, 남은 action 중 마지막 action만 사용
                             # schedule on next available step
                             next_step_idx = int(np.ceil((curr_time - eval_t_start) / dt))
                             action_timestamp = eval_t_start + (next_step_idx) * dt
                             print('Over budget', action_timestamp - curr_time)
                             action_timestamps = np.array([action_timestamp])
-                        else:
+                        else:   # 시간 내 실행 가능한 action만 스케줄링
                             this_target_poses = this_target_poses[is_new]
                             action_timestamps = action_timestamps[is_new]
 

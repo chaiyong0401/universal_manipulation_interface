@@ -15,13 +15,28 @@ import click
 import shutil
 from exiftool import ExifToolHelper
 from umi.common.timecode_util import mp4_get_start_datetime
+import os
 
 # %%
 @click.command(help='Session directories. Assumming mp4 videos are in <session_dir>/raw_videos')
 @click.argument('session_dir', nargs=-1)
 def main(session_dir):
     for session in session_dir:
-        session = pathlib.Path(os.path.expanduser(session)).absolute()
+        
+        if os.path.isabs(session):
+            print("abs direction")
+            session = os.path.relpath(session,os.getcwd())
+        else:
+            print("not abs")
+            session = pathlib.Path(os.getcwd()).joinpath(session).resolve()
+            
+        session = pathlib.Path(os.path.join(os.getcwd(), session))
+        session = pathlib.Path(os.getcwd()).joinpath(session).resolve()
+        # session = pathlib.Path(session).resolve()
+        # session = pathlib.Path(os.path.expanduser(session)).absolute()
+        print(f"Resolved session path: {session}")
+        print(f"Absolute session path: {session.absolute()}")
+        print(f"Current working directory: {os.getcwd()}")
         # hardcode subdirs
         input_dir = session.joinpath('raw_videos')
         output_dir = session.joinpath('demos')
@@ -35,7 +50,8 @@ def main(session_dir):
                 shutil.move(mp4_path, out_path)
         
         # create mapping video if don't exist
-        mapping_vid_path = input_dir.joinpath('mapping.mp4')
+        # mapping_vid_path = input_dir.joinpath('mapping.mp4')
+        mapping_vid_path = input_dir.joinpath('mapping.MP4')
         if (not mapping_vid_path.exists()) and not(mapping_vid_path.is_symlink()):
             max_size = -1
             max_path = None
@@ -45,7 +61,7 @@ def main(session_dir):
                     max_size = size
                     max_path = mp4_path
             shutil.move(max_path, mapping_vid_path)
-            print(f"raw_videos/mapping.mp4 don't exist! Renaming largest file {max_path.name}.")
+            print(f"raw_videos/mapping.mp4 donnnnn't exist! Renaming largest file {max_path.name}.")
         
         # create gripper calibration video if don't exist
         gripper_cal_dir = input_dir.joinpath('gripper_calibration')
